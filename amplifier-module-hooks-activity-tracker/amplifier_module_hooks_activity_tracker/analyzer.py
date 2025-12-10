@@ -30,15 +30,47 @@ class ActivityAnalyzer:
     def llm_client(self):
         """Lazy-load LLM client."""
         if self._llm_client is None:
-            try:
-                from openai import AsyncOpenAI
+            client_type = self.config.get("embedding_provider", None)
+            if client_type is None:
+                logger.warning("embedding_provider not set in config, defaulting to OpenAI")
+                client_type = "OpenAI"
 
-                api_key = os.getenv("OPENAI_API_KEY")
-                if not api_key:
-                    logger.warning("OPENAI_API_KEY not set, LLM analysis will fail")
-                self._llm_client = AsyncOpenAI(api_key=api_key)
-            except Exception as e:
-                logger.error(f"Failed to initialize LLM client: {e}")
+            if client_type == "AzureOpenAI":
+                from openai import AzureOpenAI, OpenAIError
+                from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+                
+                # Retrieve Azure OpenAI configuration
+                azure_endpoint = self.config.get("embeddding_endpoint", None)
+                azure_embedding_model = os.getenv("embedding_model", None)
+                azure_embedding_model_version = self.config.get("embedding_model_version", "2025-01-01-preview")
+                
+                if not azure_endpoint or not azure_embedding_model or not azure_embedding_model_version:
+                    logger.warning(
+                        f"Azure OpenAI configuration not set properly, LLM analysis will fail. Endpoint: {azure_endpoint}, Model: {azure_embedding_model}, Model Version: {azure_embedding_model_version}"
+                    )
+                
+                logging.info('Initializing Azure OpenAI client')
+                try:
+                    self._llm_client = AzureOpenAI(
+                        azure_endpoint=azure_endpoint,
+                        api_version=azure_embedding_model_version,
+                        azure_ad_token_provider=get_bearer_token_provider(
+                            DefaultAzureCredential(), 'https://cognitiveservices.azure.com/.default'
+                        ),
+                    )
+                    logging.info('Azure OpenAI client initialized successfully')
+                except OpenAIError as e:
+                    logging.error('Failed to initialize Azure OpenAI client:', exc_info=e)
+                    raise
+            else:
+                try:
+                    from openai import AsyncOpenAI
+                    api_key = os.getenv("OPENAI_API_KEY")
+                    if not api_key:
+                        logger.warning("OPENAI_API_KEY not set, LLM analysis will fail")
+                    self._llm_client = AsyncOpenAI(api_key=api_key)
+                except Exception as e:
+                    logger.error(f"Failed to initialize LLM client: {e}")
         return self._llm_client
 
     @property
